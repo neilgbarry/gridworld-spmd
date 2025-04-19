@@ -7,17 +7,23 @@ import numpy as np
 
 import wbmdp 
 
-def policy_update(pi, psi, eta):
+def policy_update(pi, psi, eta, q=1.0):
     """ Closed-form solution with PMD subproblem
 
     :param pi (np.ndarray): current policy
     :param psi (np.ndarray): current policy's advantage function
     :param eta (float): step size
+    :param q (float): Tsallis entropic index (q = 1 > KL divergence)
     :return (np.ndarray): next policy (should be same shape as @pi)
     """
     
     # Apply psi to update the policy
-    updated = pi * np.exp(-eta * psi.T)
+    if q == 1.0: # KL
+        updated = pi * np.exp(-eta * psi.T)
+    else: # Tsallis
+        base = pi ** (1 - q) - (1 - q) * eta * psi.T
+        base = np.maximum(base, 0)
+        updated = base ** (1 / (1 - q))
 
     # Normalize across actions
     updated /= np.sum(updated, axis=0, keepdims=True)
@@ -51,9 +57,24 @@ def train(settings):
     agg_psi_t = np.zeros((env.n_states, env.n_actions), dtype=float)
     agg_V_t = np.zeros(env.n_states, dtype=float)
 
+    if settings['advantage'] == 'linear':
+        env.init_estimate_advantage_online_linear({
+            "linear_learning_rate": "constant",
+            "linear_eta0": 0.1,
+            "linear_max_iter": 300,
+            "linear_alpha": 0.0001
+        })
+
     s_time = time.time()
     for t in range(settings["n_iters"]):
-        (psi_t, V_t) = env.estimate_advantage_generative(pi_t, settings["N"], settings["T"])
+        if settings['advantage'] == 'generative':
+            (psi_t, V_t) = env.estimate_advantage_generative(pi_t, settings["N"], settings["T"]) # Generative
+        elif settings['advantage'] == 'linear':
+            (psi_t, V_t) = env.estimate_advantage_online_linear(pi_t, settings["T"]) # Online Linear
+        elif settings['advantage'] == 'mc':
+            (psi_t, V_t, visit_len_state_action) = env.estimate_advantage_online_mc(pi_t, settings["T"]*100, 0*((1 - env.gamma) ** 2) / env.n_actions, True) # Online MC
+        else:
+            print("ERROR: INCORRECT ADVANTAGE FUNCTION")
         adv_gap = np.max(-agg_psi_t, axis=1)/(1.-env.gamma)
 
         alpha_t = 1./(t+1)
@@ -70,7 +91,7 @@ def train(settings):
 
         # eta_t = settings["alpha"]/(t+1)**0.5
         eta_t = settings["alpha"]/(settings["n_iters"])**0.5
-        pi_t = policy_update(pi_t, psi_t, eta_t) 
+        pi_t = policy_update(pi_t, psi_t, eta_t, settings['divergence_shape'])
 
     print("Total runtime: %.2fs" % (time.time() - s_time))
 
@@ -95,6 +116,9 @@ if __name__ == "__main__":
     parser.add_argument("--env_name", type=str, choices=["gridworld", "taxi"])
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n_iters", type=int, default=200)
+    parser.add_argument("--advantage", type=str, default="generative", choices=["generative", "linear", "mc"])
+    parser.add_argument("--divergence", type=float, default=1.0)
+
     args = parser.parse_args()
 
     settings = dict({
@@ -106,6 +130,8 @@ if __name__ == "__main__":
         "env_name": args.env_name,
         "n_iters": args.n_iters,
         "seed": args.seed,
+        "advantage": args.advantage,
+        "divergence_shape": args.divergence
     })
 
     train(settings)
