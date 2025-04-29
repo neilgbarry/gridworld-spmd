@@ -21,9 +21,7 @@ def policy_update(pi, psi, eta, q=1.0):
     if q == 1.0: # KL
         updated = pi * np.exp(-eta * psi.T)
     else: # Tsallis
-        base = pi ** (1 - q) - (1 - q) * eta * psi.T
-        base = np.maximum(base, 0)
-        updated = base ** (1 / (1 - q))
+        pass
 
     # Normalize across actions
     updated /= np.sum(updated, axis=0, keepdims=True)
@@ -118,6 +116,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_iters", type=int, default=200)
     parser.add_argument("--advantage", type=str, default="generative", choices=["generative", "linear", "mc"])
     parser.add_argument("--divergence", type=float, default=1.0)
+    parser.add_argument("--tval", type=int, default=50, help="T value for online MC advantage estimation")
 
     args = parser.parse_args()
 
@@ -125,7 +124,7 @@ if __name__ == "__main__":
         "alpha": args.alpha,
         "visual": args.visual,
         "N": 1,
-        "T": 50,
+        "T": args.tval,
         "gamma": 0.9,
         "env_name": args.env_name,
         "n_iters": args.n_iters,
